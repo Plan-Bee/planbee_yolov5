@@ -1,4 +1,3 @@
-import argparse
 import copy
 
 import numpy as np
@@ -8,7 +7,6 @@ from typing import Union, List, Optional
 
 import norfair
 from norfair import Detection, Tracker, Video
-from numpy import ndarray
 
 max_distance_between_points: int = 30
 
@@ -99,21 +97,18 @@ def yolo_detections_to_norfair_detections(
 	return norfair_detections
 
 
-parser = argparse.ArgumentParser(description="Track objects in a video.")
-parser.add_argument("files", type=str, nargs="+", help="Video files to process")
-parser.add_argument("--detector_path", type=str, default="yolov5m6.pt", help="YOLOv5 model path")
-parser.add_argument("--img_size", type=int, default="720", help="YOLOv5 inference size (pixels)")
-parser.add_argument("--conf_thresh", type=float, default="0.25", help="YOLOv5 object confidence threshold")
-parser.add_argument("--iou_thresh", type=float, default="0.45", help="YOLOv5 IOU threshold for NMS")
-parser.add_argument('--classes', nargs='+', type=int, help='Filter by class: --classes 0, or --classes 0 2 3')
-parser.add_argument("--device", type=str, default=None, help="Inference device: 'cpu' or 'cuda'")
-parser.add_argument("--track_points", type=str, default="centroid", help="Track points: 'centroid' or 'bbox'")
-args = parser.parse_args()
+def track_bees(
+		file: str,
+		output_path: str,
+		detector_path: str = "beeyolov5/bees_best.pt",
+		img_size: int = 720,
+		conf_thresh: float = 0.25,
+		iou_thresh: float = 0.45,
+		device: str = 'cuda',
+		track_points: str = "centroid"):
+	model = YOLO(detector_path, device=device)
 
-model = YOLO(args.detector_path, device=args.device)
-
-for input_path in args.files:
-	video = Video(input_path=input_path)
+	video = Video(input_path=file, output_path=output_path)
 	tracker = Tracker(
 		distance_function=euclidean_distance,
 		distance_threshold=max_distance_between_points,
@@ -125,19 +120,18 @@ for input_path in args.files:
 	for frame in video:
 		yolo_detections = model(
 			frame,
-			conf_threshold=args.conf_thresh,
-			iou_threshold=args.iou_thresh,
-			image_size=args.img_size,
-			classes=args.classes
+			conf_threshold=conf_thresh,
+			iou_threshold=iou_thresh,
+			image_size=img_size
 		)
-		detections = yolo_detections_to_norfair_detections(yolo_detections, track_points=args.track_points)
+		detections = yolo_detections_to_norfair_detections(yolo_detections, track_points=track_points)
 		tracked_objects = tracker.update(detections=detections)
 
 		total_tracked_objects.append(copy.deepcopy(tracked_objects))
 
-		if args.track_points == 'centroid':
+		if track_points == 'centroid':
 			norfair.draw_points(frame, detections)
-		elif args.track_points == 'bbox':
+		elif track_points == 'bbox':
 			norfair.draw_boxes(frame, detections)
 		norfair.draw_tracked_objects(frame, tracked_objects)
 		video.write(frame)
@@ -161,4 +155,11 @@ for input_path in args.files:
 				)
 				converted_object_map[detected_object.id] = obj
 
-	print(converted_object_map)
+	return converted_object_map
+
+
+if __name__ == '__main__':
+	tracked_bees = track_bees(
+		'datasets/bees/videos/2021-10-28.mp4',
+		'beeyolov5/runs/track/2021-10-28.mp4'
+	)
