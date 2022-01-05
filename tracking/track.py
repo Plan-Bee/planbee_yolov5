@@ -1,9 +1,11 @@
 import copy
+import math
 
 import numpy as np
 import torch
 import yolov5
 from typing import Union, List, Optional
+from enum import Enum
 
 import norfair
 from norfair import Detection, Tracker, Video
@@ -17,6 +19,9 @@ class BeeTrackingObject:
 	end_frame_id: int
 	end_age: int
 	estimates: [(int, int)]
+	angle: int  # 0° is if the bee flies "to the right on the x-axis". Angle turns clockwise
+	flies_out_of_frame: bool
+	flies_into_hive: bool
 
 	def __init__(self, object_id: int, start_frame_id: int, age: int, initial_estimate: tuple):
 		self.object_id = object_id
@@ -24,6 +29,17 @@ class BeeTrackingObject:
 		self.end_frame_id = start_frame_id
 		self.end_age = age
 		self.estimates = [initial_estimate]
+
+
+class HivePosition(Enum):
+	RIGHT = 0
+	BOTTOM_RIGHT = 45
+	BOTTOM = 90
+	BOTTOM_LEFT = 135
+	LEFT = 180
+	TOP_LEFT = 225
+	TOP = 270
+	TOP_RIGHT = 315
 
 
 class YOLO:
@@ -105,7 +121,7 @@ def track_bees(
 		conf_thresh: float = 0.25,
 		iou_thresh: float = 0.45,
 		device: str = 'cuda',
-		track_points: str = "centroid"):
+		track_points: str = "centroid") -> [BeeTrackingObject]:
 	model = YOLO(detector_path, device=device)
 
 	video = Video(input_path=file, output_path=output_path)
@@ -116,6 +132,8 @@ def track_bees(
 
 	# Save the tracked objects for each frame
 	total_tracked_objects: [[]] = []
+
+	frame_count = 0
 
 	for frame in video:
 		yolo_detections = model(
@@ -136,6 +154,10 @@ def track_bees(
 		norfair.draw_tracked_objects(frame, tracked_objects)
 		video.write(frame)
 
+		if len(total_tracked_objects) >= 100:
+			frame_count = video.frame_counter
+			break
+
 	# Convert list from list of images to list of objects
 	converted_object_map = {}
 
@@ -155,7 +177,37 @@ def track_bees(
 				)
 				converted_object_map[detected_object.id] = obj
 
-	return converted_object_map
+	bee_list = converted_object_map.values()
+
+	# Check if bees flew out of frame
+	for bee in bee_list:
+		bee.flies_out_of_frame = bee.end_frame_id < frame_count - 1
+
+	return bee_list
+
+
+def get_directions(tracked_bees: [BeeTrackingObject], hive_position: HivePosition) -> [BeeTrackingObject]:
+	# Calculate angles
+	greater_than_angle = (hive_position.value - 90) % 360
+	smaller_than_angle = (hive_position.value + 90) % 360
+
+	for bee in tracked_bees:
+		start_coordinates = bee.estimates[0]
+		end_coordinates = bee.estimates[-1]
+
+		x_difference = end_coordinates[0] - start_coordinates[0]
+		y_difference = end_coordinates[1] - start_coordinates[1]
+
+		bee.angle = math.degrees(math.atan2(y_difference, x_difference)) % 360
+		bee.flies_into_hive = bee.flies_out_of_frame and (
+				bee.angle > greater_than_angle or bee.angle < smaller_than_angle)
+
+		flies_to = "Hive" if bee.flies_into_hive else "Away" if bee.flies_out_of_frame else "Nowhere"
+
+		print(
+			f'{bee.object_id}: {bee.angle} ({x_difference}, {y_difference}), to: {flies_to}')
+
+	return tracked_bees
 
 
 if __name__ == '__main__':
@@ -163,3 +215,4 @@ if __name__ == '__main__':
 		'datasets/bees/videos/2021-10-28.mp4',
 		'beeyolov5/runs/track/2021-10-28.mp4'
 	)
+	tracked_bees = get_directions(tracked_bees, HivePosition.BOTTOM_RIGHT)
