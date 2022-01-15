@@ -1,6 +1,7 @@
 import copy
 import math
 
+import cv2
 import numpy as np
 import torch
 import yolov5
@@ -42,6 +43,56 @@ class BeeTrackingObject:
 		self.end_age = age
 		self.estimates = [initial_estimate]
 
+	def _calculate_directions(self, hive_position: HivePosition, moving_offset: int):
+		"""
+		Calculates where the bee is going to
+
+		Args:
+			hive_position: The position of the hive in the frame
+			moving_offset: In pixels on the frame. Has to be calculated based on the image resolution!
+		"""
+		# Check if the bee moves more than the required offset
+		if self.flight_distance < moving_offset:
+			self.flies_into_hive = False
+			self.flies_out_of_frame = False
+			return
+
+		# Calculate angles
+		greater_than_angle = (hive_position.value - 90) % 360
+		smaller_than_angle = (hive_position.value + 90) % 360
+
+		start_coordinates = self.estimates[0]
+		end_coordinates = self.estimates[-1]
+
+		x_difference = end_coordinates[0] - start_coordinates[0]
+		y_difference = end_coordinates[1] - start_coordinates[1]
+
+		self.angle = math.degrees(math.atan2(y_difference, x_difference)) % 360
+		self.flies_into_hive = self.flies_out_of_frame and (
+				self.angle > greater_than_angle or self.angle < smaller_than_angle)
+
+		flies_to = "Hive" if self.flies_into_hive else "Away" if self.flies_out_of_frame else "Nowhere"
+
+		print(
+			f'{self.object_id}: {self.angle} ({x_difference}, {y_difference}), to: {flies_to}')
+
+	def _calculate_distances(self):
+		start_coordinates = self.estimates[0]
+		end_coordinates = self.estimates[-1]
+
+		x_difference = end_coordinates[0] - start_coordinates[0]
+		y_difference = end_coordinates[1] - start_coordinates[1]
+
+		hypo = math.sqrt(x_difference ** 2 + y_difference ** 2)
+
+		self.flight_distance = hypo
+
+		print(f'{self.object_id}: {start_coordinates}, {end_coordinates} -> {hypo}')
+
+	def determine_movement(self, hive_position, moving_offset):
+		self._calculate_distances()
+		self._calculate_directions(hive_position, moving_offset)
+
 
 class YOLO:
 	def __init__(self, model_path: str, device: Optional[str] = None):
@@ -80,7 +131,8 @@ def yolo_detections_to_norfair_detections(
 		yolo_detections: torch.tensor,
 		track_points: str = 'centroid'  # bbox or centroid
 ) -> List[Detection]:
-	"""convert detections_as_xywh to norfair detections
+	"""
+	convert detections_as_xywh to norfair detections
 	"""
 	norfair_detections: List[Detection] = []
 
@@ -115,8 +167,7 @@ def yolo_detections_to_norfair_detections(
 
 
 def track_bees(
-		file: str,
-		output_path: str,
+		video: Video,
 		detector_path: str = "beeyolov5/bees_best.pt",
 		img_size: int = 720,
 		conf_thresh: float = 0.25,
@@ -125,7 +176,6 @@ def track_bees(
 		track_points: str = "centroid") -> [BeeTrackingObject]:
 	model = YOLO(detector_path, device=device)
 
-	video = Video(input_path=file, output_path=output_path)
 	tracker = Tracker(
 		distance_function=euclidean_distance,
 		distance_threshold=max_distance_between_points,
@@ -155,7 +205,7 @@ def track_bees(
 		norfair.draw_tracked_objects(frame, tracked_objects)
 		video.write(frame)
 
-		if len(total_tracked_objects) >= 1000:
+		if len(total_tracked_objects) >= 100:
 			frame_count = video.frame_counter
 			break
 
@@ -186,52 +236,25 @@ def track_bees(
 
 	return bee_list
 
+def calculate_moving_offset(video: Video, percentage: int) -> ():
+	vid_cap = cv2.VideoCapture(video.input_path)
+	width = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+	height = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-def get_directions(tracked_bees: [BeeTrackingObject], hive_position: HivePosition) -> [BeeTrackingObject]:
-	# Calculate angles
-	greater_than_angle = (hive_position.value - 90) % 360
-	smaller_than_angle = (hive_position.value + 90) % 360
+	hypo = math.sqrt(width**2 + height**2)
 
-	for bee in tracked_bees:
-		start_coordinates = bee.estimates[0]
-		end_coordinates = bee.estimates[-1]
-
-		x_difference = end_coordinates[0] - start_coordinates[0]
-		y_difference = end_coordinates[1] - start_coordinates[1]
-
-		bee.angle = math.degrees(math.atan2(y_difference, x_difference)) % 360
-		bee.flies_into_hive = bee.flies_out_of_frame and (
-				bee.angle > greater_than_angle or bee.angle < smaller_than_angle)
-
-		flies_to = "Hive" if bee.flies_into_hive else "Away" if bee.flies_out_of_frame else "Nowhere"
-
-		print(
-			f'{bee.object_id}: {bee.angle} ({x_difference}, {y_difference}), to: {flies_to}')
-
-	return tracked_bees
-
-
-def get_distances(tracked_bees: [BeeTrackingObject]) -> [BeeTrackingObject]:
-	for bee in tracked_bees:
-		start_coordinates = bee.estimates[0]
-		end_coordinates = bee.estimates[-1]
-
-		x_difference = end_coordinates[0] - start_coordinates[0]
-		y_difference = end_coordinates[1] - start_coordinates[1]
-
-		hypo = math.sqrt(x_difference ** 2 + y_difference ** 2)
-
-		bee.flight_distance = hypo
-
-		print(f'{bee.object_id}: {start_coordinates}, {end_coordinates} -> {hypo}')
-
-	return tracked_bees
+	return hypo * percentage / 100
 
 
 if __name__ == '__main__':
+	video = Video(input_path='datasets/bees/videos/2021-10-28.mp4', output_path='beeyolov5/runs/track/2021-10-28.mp4')
 	tracked_bees = track_bees(
-		'datasets/bees/videos/2021-10-28.mp4',
-		'beeyolov5/runs/track/2021-10-28.mp4'
+		video
 	)
-	tracked_bees = get_directions(tracked_bees, HivePosition.BOTTOM_RIGHT)
-	tracked_bees = get_distances(tracked_bees)
+	moving_offset = calculate_moving_offset(video, 2)
+
+	for bee in tracked_bees:
+		bee.determine_movement(HivePosition.BOTTOM_RIGHT, moving_offset)
+
+	for bee in tracked_bees:
+		print(bee.flight_distance)
