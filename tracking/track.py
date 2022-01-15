@@ -13,24 +13,6 @@ from norfair import Detection, Tracker, Video
 max_distance_between_points: int = 30
 
 
-class BeeTrackingObject:
-	object_id: int
-	start_frame_id: int
-	end_frame_id: int
-	end_age: int
-	estimates: [(int, int)]
-	angle: int  # 0° is if the bee flies "to the right on the x-axis". Angle turns clockwise
-	flies_out_of_frame: bool
-	flies_into_hive: bool
-
-	def __init__(self, object_id: int, start_frame_id: int, age: int, initial_estimate: tuple):
-		self.object_id = object_id
-		self.start_frame_id = start_frame_id
-		self.end_frame_id = start_frame_id
-		self.end_age = age
-		self.estimates = [initial_estimate]
-
-
 class HivePosition(Enum):
 	RIGHT = 0
 	BOTTOM_RIGHT = 45
@@ -40,6 +22,25 @@ class HivePosition(Enum):
 	TOP_LEFT = 225
 	TOP = 270
 	TOP_RIGHT = 315
+
+
+class BeeTrackingObject:
+	object_id: int
+	start_frame_id: int
+	end_frame_id: int
+	end_age: int
+	estimates: [(int, int)]
+	angle: int  # 0° is if the bee flies "to the right on the x-axis". Angle turns clockwise
+	flight_distance: float
+	flies_out_of_frame: bool
+	flies_into_hive: bool
+
+	def __init__(self, object_id: int, start_frame_id: int, age: int, initial_estimate: tuple):
+		self.object_id = object_id
+		self.start_frame_id = start_frame_id
+		self.end_frame_id = start_frame_id
+		self.end_age = age
+		self.estimates = [initial_estimate]
 
 
 class YOLO:
@@ -154,7 +155,7 @@ def track_bees(
 		norfair.draw_tracked_objects(frame, tracked_objects)
 		video.write(frame)
 
-		if len(total_tracked_objects) >= 100:
+		if len(total_tracked_objects) >= 1000:
 			frame_count = video.frame_counter
 			break
 
@@ -210,9 +211,27 @@ def get_directions(tracked_bees: [BeeTrackingObject], hive_position: HivePositio
 	return tracked_bees
 
 
+def get_distances(tracked_bees: [BeeTrackingObject]) -> [BeeTrackingObject]:
+	for bee in tracked_bees:
+		start_coordinates = bee.estimates[0]
+		end_coordinates = bee.estimates[-1]
+
+		x_difference = end_coordinates[0] - start_coordinates[0]
+		y_difference = end_coordinates[1] - start_coordinates[1]
+
+		hypo = math.sqrt(x_difference ** 2 + y_difference ** 2)
+
+		bee.flight_distance = hypo
+
+		print(f'{bee.object_id}: {start_coordinates}, {end_coordinates} -> {hypo}')
+
+	return tracked_bees
+
+
 if __name__ == '__main__':
 	tracked_bees = track_bees(
 		'datasets/bees/videos/2021-10-28.mp4',
 		'beeyolov5/runs/track/2021-10-28.mp4'
 	)
 	tracked_bees = get_directions(tracked_bees, HivePosition.BOTTOM_RIGHT)
+	tracked_bees = get_distances(tracked_bees)
