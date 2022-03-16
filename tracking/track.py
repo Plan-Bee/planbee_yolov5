@@ -4,123 +4,21 @@ import math
 import cv2
 import numpy as np
 import torch
-import yolov5
-from typing import Union, List, Optional
-from enum import Enum
+
+from typing import List
 
 import norfair
 from norfair import Detection, Tracker, Video
 
+from tracking.models.bee_movement import BeeMovement
+from tracking.models.bee_tracking_object import BeeTrackingObject
+from tracking.models.hive_position import HivePosition
+from tracking.models.yolo import YOLO
+from time import time
+from datetime import datetime, timedelta
+from persistence import mariadb_connector as db
+
 max_distance_between_points: int = 30
-
-
-class HivePosition(Enum):
-	RIGHT = 0
-	BOTTOM_RIGHT = 45
-	BOTTOM = 90
-	BOTTOM_LEFT = 135
-	LEFT = 180
-	TOP_LEFT = 225
-	TOP = 270
-	TOP_RIGHT = 315
-
-
-class BeeTrackingObject:
-	object_id: int
-	start_frame_id: int
-	end_frame_id: int
-	end_age: int
-	estimates: [(int, int)]
-	angle: int  # 0° is if the bee flies "to the right on the x-axis". Angle turns clockwise
-	flight_distance: float
-	flies_out_of_frame: bool
-	flies_into_hive: bool
-
-	def __init__(self, object_id: int, start_frame_id: int, age: int, initial_estimate: tuple):
-		self.object_id = object_id
-		self.start_frame_id = start_frame_id
-		self.end_frame_id = start_frame_id
-		self.end_age = age
-		self.estimates = [initial_estimate]
-
-	def _calculate_directions(self, hive_position: HivePosition, moving_offset: int):
-		"""
-		Calculates where the bee is going to
-
-		Args:
-			hive_position: The position of the hive in the frame
-			moving_offset: In pixels on the frame. Has to be calculated based on the image resolution!
-		"""
-		# Check if the bee moves more than the required offset
-		if self.flight_distance < moving_offset:
-			self.flies_into_hive = False
-			self.flies_out_of_frame = False
-			return
-
-		# Calculate angles
-		greater_than_angle = (hive_position.value - 90) % 360
-		smaller_than_angle = (hive_position.value + 90) % 360
-
-		start_coordinates = self.estimates[0]
-		end_coordinates = self.estimates[-1]
-
-		x_difference = end_coordinates[0] - start_coordinates[0]
-		y_difference = end_coordinates[1] - start_coordinates[1]
-
-		self.angle = math.degrees(math.atan2(y_difference, x_difference)) % 360
-		self.flies_into_hive = self.flies_out_of_frame and (
-				self.angle > greater_than_angle or self.angle < smaller_than_angle)
-
-		flies_to = "Hive" if self.flies_into_hive else "Away" if self.flies_out_of_frame else "Nowhere"
-
-		print(
-			f'{self.object_id}: {self.angle} ({x_difference}, {y_difference}), to: {flies_to}')
-
-	def _calculate_distances(self):
-		start_coordinates = self.estimates[0]
-		end_coordinates = self.estimates[-1]
-
-		x_difference = end_coordinates[0] - start_coordinates[0]
-		y_difference = end_coordinates[1] - start_coordinates[1]
-
-		hypo = math.sqrt(x_difference ** 2 + y_difference ** 2)
-
-		self.flight_distance = hypo
-
-		print(f'{self.object_id}: {start_coordinates}, {end_coordinates} -> {hypo}')
-
-	def determine_movement(self, hive_position, moving_offset):
-		self._calculate_distances()
-		self._calculate_directions(hive_position, moving_offset)
-
-
-class YOLO:
-	def __init__(self, model_path: str, device: Optional[str] = None):
-		if device is not None and "cuda" in device and not torch.cuda.is_available():
-			raise Exception(
-				"Selected device='cuda', but cuda is not available to Pytorch."
-			)
-		# automatically set device if its None
-		elif device is None:
-			device = "cuda:0" if torch.cuda.is_available() else "cpu"
-		# load model
-		self.model = yolov5.load(model_path, device=device)
-
-	def __call__(
-			self,
-			img: Union[str, np.ndarray],
-			conf_threshold: float = 0.25,
-			iou_threshold: float = 0.45,
-			image_size: int = 720,
-			classes: Optional[List[int]] = None
-	) -> torch.tensor:
-
-		self.model.conf = conf_threshold
-		self.model.iou = iou_threshold
-		if classes is not None:
-			self.model.classes = classes
-		detections = self.model(img, size=image_size)
-		return detections
 
 
 def euclidean_distance(detection, tracked_object):
@@ -236,25 +134,59 @@ def track_bees(
 
 	return bee_list
 
+
 def calculate_moving_offset(video: Video, percentage: int) -> ():
 	vid_cap = cv2.VideoCapture(video.input_path)
 	width = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 	height = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-	hypo = math.sqrt(width**2 + height**2)
+	hypo = math.sqrt(width ** 2 + height ** 2)
 
 	return hypo * percentage / 100
 
 
+def get_video_fps(video: Video) -> int:
+	vid_cap = cv2.VideoCapture(video.input_path)
+
+	return int(vid_cap.get(cv2.CAP_PROP_FPS))
+
+
+def get_timestamp(frame: int, fps: float, start_time: datetime) -> float:
+	delta = timedelta(seconds=frame / fps)
+	return (start_time + delta).timestamp()
+
+
 if __name__ == '__main__':
 	video = Video(input_path='datasets/bees/videos/2021-10-28.mp4', output_path='beeyolov5/runs/track/2021-10-28.mp4')
-	tracked_bees = track_bees(
-		video
-	)
+	start_time = datetime.strptime('2021-10-28 14:37:51', '%Y-%m-%d %H:%M:%S')  # TODO change
+	tracked_bees = track_bees(video)
 	moving_offset = calculate_moving_offset(video, 2)
+	fps = get_video_fps(video)
 
 	for bee in tracked_bees:
 		bee.determine_movement(HivePosition.BOTTOM_RIGHT, moving_offset)
 
+	# Now every bee has values for start_frame, end_frame and state of bee_movement
+	# Furthermore we can transform the list of bees to a list form of timeseries
+
+	bee_data: {float, list[int]} = {}
+
 	for bee in tracked_bees:
-		print(bee.flight_distance)
+		for frame in range(bee.start_frame_id, bee.end_frame_id):
+			timestamp = get_timestamp(frame, fps, start_time)
+
+			if timestamp not in bee_data.keys():
+				bee_data[timestamp] = [0, 0, 0]
+
+			if bee.bee_movement == BeeMovement.TO_HIVE:
+				bee_data[timestamp][0] += 1
+			elif bee.bee_movement == BeeMovement.FROM_HIVE:
+				bee_data[timestamp][1] += 1
+			elif bee.bee_movement == BeeMovement.NO_MOVEMENT:
+				bee_data[timestamp][2] += 1
+
+	conn = db.get_connection()
+	db.insert_tracking_data(conn, bee_data, 1, 1)
+
+
+	print(bee_data)
