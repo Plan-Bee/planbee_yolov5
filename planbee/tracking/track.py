@@ -14,9 +14,8 @@ from tracking.models.bee_movement import BeeMovement
 from tracking.models.bee_tracking_object import BeeTrackingObject
 from tracking.models.hive_position import HivePosition
 from tracking.models.yolo import YOLO
-from time import time
 from datetime import datetime, timedelta
-from persistence import mariadb_connector as db
+from planbee.persistence import mariadb_connector as db
 
 max_distance_between_points: int = 30
 
@@ -66,7 +65,7 @@ def yolo_detections_to_norfair_detections(
 
 def track_bees(
 		video: Video,
-		detector_path: str = "beeyolov5/bees_best.pt",
+		detector_path: str = "yolov5/bees_best.pt",
 		img_size: int = 720,
 		conf_thresh: float = 0.25,
 		iou_thresh: float = 0.45,
@@ -157,7 +156,7 @@ def get_timestamp(frame: int, fps: float, start_time: datetime) -> float:
 
 
 if __name__ == '__main__':
-	video = Video(input_path='datasets/bees/videos/2021-10-28.mp4', output_path='beeyolov5/runs/track/2021-10-28.mp4')
+	video = Video(input_path='datasets/bees/videos/2021-10-28.mp4', output_path='yolov5/runs/track/2021-10-28.mp4')
 	start_time = datetime.strptime('2021-10-28 14:37:51', '%Y-%m-%d %H:%M:%S')  # TODO change
 	tracked_bees = track_bees(video)
 	moving_offset = calculate_moving_offset(video, 2)

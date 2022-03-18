@@ -20,7 +20,7 @@
 *.data
 *.json
 *.cfg
-!beeyolov5/setup.cfg
+!yolov5/setup.cfg
 !cfg/yolov3*.cfg
 
 storage.googleapis.com
@@ -87,7 +87,7 @@ sdist/
 var/
 wheels/
 *.egg-info/
-/wandb/
+/yolov5/wandb/
 .installed.cfg
 *.egg
 
@@ -259,6 +259,7 @@ fabric.properties
 datasets/
 !datasets/bees/images/.gitkeep
 !datasets/bees/labels/.gitkeep
-beeyolov5/runs/
-beeyolov5/wandb/
-beeyolov5/data/images
+yolov5/runs/
+yolov5/wandb/
+yolov5/data/images
+yolov5/wandb
