@@ -3,6 +3,7 @@ import math
 from tracking.models import bee_movement
 from tracking.models.hive_position import HivePosition
 from tracking.models.bee_movement import BeeMovement
+import json
 
 
 class BeeTrackingObject:
@@ -71,3 +72,11 @@ class BeeTrackingObject:
 	def determine_movement(self, hive_position, moving_offset):
 		self._calculate_distances()
 		self._calculate_directions(hive_position, moving_offset)
+
+	def save_to_json(self, path):
+		model_as_dict = self.__dict__
+
+		with open(path, 'w', encoding='utf-8') as file:
+			json.dump(model_as_dict, file, ensure_ascii=False, indent=4)
+
+			file.close()
