@@ -1,9 +1,7 @@
 import math
 
-from tracking.models import bee_movement
-from tracking.models.hive_position import HivePosition
-from tracking.models.bee_movement import BeeMovement
-import json
+from .hive_position import HivePosition
+from .bee_movement import BeeMovement
 
 
 class BeeTrackingObject:
@@ -11,8 +9,8 @@ class BeeTrackingObject:
 	start_frame_id: int
 	end_frame_id: int
 	end_age: int
-	estimates: [(int, int)]
-	angle: int  # 0° is if the bee flies "to the right on the x-axis". Angle turns clockwise
+	position_estimates: [(int, int)]
+	angle: int = -1  # 0° is if the bee flies "to the right on the x-axis". Angle turns clockwise
 	flight_distance: float
 	flies_out_of_frame: bool
 	bee_movement: BeeMovement
@@ -22,7 +20,7 @@ class BeeTrackingObject:
 		self.start_frame_id = start_frame_id
 		self.end_frame_id = start_frame_id
 		self.end_age = age
-		self.estimates = [initial_estimate]
+		self.position_estimates = [initial_estimate]
 
 	def _calculate_directions(self, hive_position: HivePosition, moving_offset: int):
 		"""
@@ -41,8 +39,8 @@ class BeeTrackingObject:
 		greater_than_angle = (hive_position.value - 90) % 360
 		smaller_than_angle = (hive_position.value + 90) % 360
 
-		start_coordinates = self.estimates[0]
-		end_coordinates = self.estimates[-1]
+		start_coordinates = self.position_estimates[0]
+		end_coordinates = self.position_estimates[-1]
 
 		x_difference = end_coordinates[0] - start_coordinates[0]
 		y_difference = end_coordinates[1] - start_coordinates[1]
@@ -59,8 +57,8 @@ class BeeTrackingObject:
 	# print(f'{self.object_id}: {self.angle} ({x_difference}, {y_difference}), to: {flies_to}')
 
 	def _calculate_distances(self):
-		start_coordinates = self.estimates[0]
-		end_coordinates = self.estimates[-1]
+		start_coordinates = self.position_estimates[0]
+		end_coordinates = self.position_estimates[-1]
 
 		x_difference = end_coordinates[0] - start_coordinates[0]
 		y_difference = end_coordinates[1] - start_coordinates[1]
@@ -73,10 +71,15 @@ class BeeTrackingObject:
 		self._calculate_distances()
 		self._calculate_directions(hive_position, moving_offset)
 
-	def save_to_json(self, path):
-		model_as_dict = self.__dict__
-
-		with open(path, 'w', encoding='utf-8') as file:
-			json.dump(model_as_dict, file, ensure_ascii=False, indent=4)
-
-			file.close()
+	def get_attribute_dict(self) -> dict:
+		return {
+			'object_id': self.object_id,
+			'start_frame_id': self.start_frame_id,
+			'end_frame_id': self.end_frame_id,
+			'end_age': self.end_age,
+			'estimates': self.position_estimates,
+			'angle': self.angle,
+			'flight_distance': self.flight_distance,
+			'flies_out_of_frame': self.flies_out_of_frame,
+			'bee_movement': self.bee_movement.name
+		}

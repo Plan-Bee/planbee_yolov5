@@ -13,7 +13,7 @@ torchvision>=0.8.1
 tqdm>=4.41.0
 
 # Tracking ------------------------------------
-yolov5
+yolov5==6.1.0
 norfair
 
 # Persistence ---------------------------------

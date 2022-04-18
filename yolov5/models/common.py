@@ -636,12 +636,12 @@ class Detections:
     def show(self):
         self.display(show=True)  # show results
 
-    def save(self, save_dir='runs/detect/exp'):
-        save_dir = increment_path(save_dir, exist_ok=save_dir != 'runs/detect/exp', mkdir=True)  # increment save_dir
+    def save(self, save_dir='runs/detect/denoise'):
+        save_dir = increment_path(save_dir, exist_ok=save_dir != 'runs/detect/denoise', mkdir=True)  # increment save_dir
         self.display(save=True, save_dir=save_dir)  # save results
 
-    def crop(self, save=True, save_dir='runs/detect/exp'):
-        save_dir = increment_path(save_dir, exist_ok=save_dir != 'runs/detect/exp', mkdir=True) if save else None
+    def crop(self, save=True, save_dir='runs/detect/denoise'):
+        save_dir = increment_path(save_dir, exist_ok=save_dir != 'runs/detect/denoise', mkdir=True) if save else None
         return self.display(crop=True, save=save, save_dir=save_dir)  # crop results
 
     def render(self):

@@ -1,4 +1,5 @@
 import copy
+import json
 import math
 
 import cv2
@@ -10,10 +11,10 @@ from typing import List
 import norfair
 from norfair import Detection, Tracker, Video
 
-from tracking.models.bee_movement import BeeMovement
-from tracking.models.bee_tracking_object import BeeTrackingObject
-from tracking.models.hive_position import HivePosition
-from tracking.models.yolo import YOLO
+from planbee_models.bee_movement import BeeMovement
+from planbee_models.bee_tracking_object import BeeTrackingObject
+from planbee_models.hive_position import HivePosition
+from planbee_models.yolo import YOLO
 from datetime import datetime, timedelta
 from planbee.persistence import mariadb_connector as db
 
@@ -65,7 +66,7 @@ def yolo_detections_to_norfair_detections(
 
 def track_bees(
 		video: Video,
-		detector_path: str = "yolov5/bees_best.pt",
+		detector_path: str = "yolov5/runs/train/original/weights/best.pt",
 		img_size: int = 720,
 		conf_thresh: float = 0.25,
 		iou_thresh: float = 0.45,
@@ -115,7 +116,7 @@ def track_bees(
 				obj: BeeTrackingObject = converted_object_map[detected_object.id]
 				obj.end_frame_id = image_index
 				obj.end_age = detected_object.age
-				obj.estimates.append((detected_object.estimate[0][0], detected_object.estimate[0][1]))
+				obj.position_estimates.append((detected_object.estimate[0][0], detected_object.estimate[0][1]))
 			else:
 				obj = BeeTrackingObject(
 					object_id=detected_object.id,
@@ -155,15 +156,28 @@ def get_timestamp(frame: int, fps: float, start_time: datetime) -> float:
 	return (start_time + delta).timestamp()
 
 
+def save_bee_paths_to_json(bees: [BeeTrackingObject]):
+	bee_dicts = []
+
+	for this_bee in bees:
+		bee_dicts.append(this_bee.get_attribute_dict())
+
+
+	with open('bee_paths.json', 'w', encoding='utf-8') as file:
+		json.dump(bee_dicts, file, ensure_ascii=False, indent=4)
+
+
 if __name__ == '__main__':
-	video = Video(input_path='datasets/bees/videos/2021-10-28.mp4', output_path='yolov5/runs/track/2021-10-28.mp4')
-	start_time = datetime.strptime('2021-10-28 14:37:51', '%Y-%m-%d %H:%M:%S')  # TODO change
+	video = Video(input_path='datasets/bees/videos/PlanBee_Path_Tracking.mp4', output_path='yolov5/runs/track/PlanBee_Path_Tracking.mp4')
+	start_time = datetime.strptime('2021-10-28 14:38:43', '%Y-%m-%d %H:%M:%S')  # TODO change
 	tracked_bees = track_bees(video)
 	moving_offset = calculate_moving_offset(video, 2)
 	fps = get_video_fps(video)
 
 	for bee in tracked_bees:
 		bee.determine_movement(HivePosition.BOTTOM_RIGHT, moving_offset)
+
+	save_bee_paths_to_json(tracked_bees)
 
 	# Now every bee has values for start_frame, end_frame and state of bee_movement
 	# Furthermore we can transform the list of bees to a list form of timeseries
