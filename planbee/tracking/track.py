@@ -15,7 +15,7 @@ from planbee_models.bee_movement import BeeMovement
 from planbee_models.bee_tracking_object import BeeTrackingObject
 from planbee_models.hive_position import HivePosition
 from planbee_models.yolo import YOLO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from planbee.persistence import mariadb_connector as db
 
 max_distance_between_points: int = 30
@@ -103,9 +103,11 @@ def track_bees(
 		norfair.draw_tracked_objects(frame, tracked_objects)
 		video.write(frame)
 
-		if len(total_tracked_objects) >= 100:
-			frame_count = video.frame_counter
-			break
+		# if len(total_tracked_objects) >= 100:
+		# 	frame_count = video.frame_counter
+		# 	break
+
+	frame_count = video.frame_counter
 
 	# Convert list from list of images to list of objects
 	converted_object_map = {}
@@ -130,7 +132,7 @@ def track_bees(
 
 	# Check if bees flew out of frame
 	for bee in bee_list:
-		bee.flies_out_of_frame = bee.end_frame_id < frame_count - 1
+		bee.flies_out_of_frame = bee.end_frame_id < frame_count - video.output_fps
 
 	return bee_list
 
@@ -163,14 +165,22 @@ def save_bee_paths_to_json(bees: [BeeTrackingObject]):
 		bee_dicts.append(this_bee.get_attribute_dict())
 
 
-	with open('bee_paths.json', 'w', encoding='utf-8') as file:
+	with open('bee_paths_slomo_15s.json', 'w', encoding='utf-8') as file:
 		json.dump(bee_dicts, file, ensure_ascii=False, indent=4)
 
 
 if __name__ == '__main__':
-	video = Video(input_path='datasets/bees/videos/PlanBee_Path_Tracking.mp4', output_path='yolov5/runs/track/PlanBee_Path_Tracking.mp4')
-	start_time = datetime.strptime('2021-10-28 14:38:43', '%Y-%m-%d %H:%M:%S')  # TODO change
+	print(f'Start: {datetime.now()}')
+
+	video = Video(input_path='datasets/bees/videos/PlanBee_Slomo_1080p50_15s.mp4', output_path='yolov5/runs/track/PlanBee_Slomo_1080p50_15s.mp4')
+	start_time = datetime.strptime('2021-10-28 13:48:58', '%Y-%m-%d %H:%M:%S')  # TODO change
+
+	print(f'Track: {datetime.now()}')
+
 	tracked_bees = track_bees(video)
+
+	print(f'Track done {datetime.now()}')
+
 	moving_offset = calculate_moving_offset(video, 2)
 	fps = get_video_fps(video)
 
@@ -198,8 +208,10 @@ if __name__ == '__main__':
 			elif bee.bee_movement == BeeMovement.NO_MOVEMENT:
 				bee_data[timestamp][2] += 1
 
-	conn = db.get_connection()
-	db.insert_tracking_data(conn, bee_data, 1, 1)
+	#conn = db.get_connection()
+	#db.insert_tracking_data(conn, bee_data, 1, 1)
 
 
-	print(bee_data)
+	#print(bee_data)
+
+	print(f'Done: {datetime.now()}')
