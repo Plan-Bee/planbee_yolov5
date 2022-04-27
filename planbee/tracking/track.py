@@ -9,7 +9,7 @@ import torch
 from typing import List
 
 import norfair
-from norfair import Detection, Tracker, Video
+from norfair import Detection, Tracker, Video, Paths
 
 from planbee_models.bee_movement import BeeMovement
 from planbee_models.bee_tracking_object import BeeTrackingObject
@@ -82,9 +82,12 @@ def track_bees(
 	# Save the tracked objects for each frame
 	total_tracked_objects: [[]] = []
 
-	frame_count = 0
+	detections_per_frame = {}
 
 	for frame in video:
+		if video.frame_counter % 1500 == 0:
+			print(f"{video.frame_counter} frames done")
+
 		yolo_detections = model(
 			frame,
 			conf_threshold=conf_thresh,
@@ -94,6 +97,8 @@ def track_bees(
 		detections = yolo_detections_to_norfair_detections(yolo_detections, track_points=track_points)
 		tracked_objects = tracker.update(detections=detections)
 
+		detections_per_frame[video.frame_counter] = detections
+
 		total_tracked_objects.append(copy.deepcopy(tracked_objects))
 
 		if track_points == 'centroid':
@@ -101,11 +106,15 @@ def track_bees(
 		elif track_points == 'bbox':
 			norfair.draw_boxes(frame, detections)
 		norfair.draw_tracked_objects(frame, tracked_objects)
+
+		# Draw paths
+		# paths = Paths(get_points_to_draw=detections, attenuation=0)
+		# paths.draw(frame, tracked_objects)
+
 		video.write(frame)
 
-		# if len(total_tracked_objects) >= 100:
-		# 	frame_count = video.frame_counter
-		# 	break
+	# if len(total_tracked_objects) >= 100:
+	# 	break
 
 	frame_count = video.frame_counter
 
@@ -134,7 +143,7 @@ def track_bees(
 	for bee in bee_list:
 		bee.flies_out_of_frame = bee.end_frame_id < frame_count - video.output_fps
 
-	return bee_list
+	return bee_list, detections_per_frame
 
 
 def calculate_moving_offset(video: Video, percentage: int) -> ():
@@ -164,7 +173,6 @@ def save_bee_paths_to_json(bees: [BeeTrackingObject]):
 	for this_bee in bees:
 		bee_dicts.append(this_bee.get_attribute_dict())
 
-
 	with open('bee_paths_slomo_15s.json', 'w', encoding='utf-8') as file:
 		json.dump(bee_dicts, file, ensure_ascii=False, indent=4)
 
@@ -172,12 +180,19 @@ def save_bee_paths_to_json(bees: [BeeTrackingObject]):
 if __name__ == '__main__':
 	print(f'Start: {datetime.now()}')
 
-	video = Video(input_path='datasets/bees/videos/PlanBee_Slomo_1080p50_15s.mp4', output_path='yolov5/runs/track/PlanBee_Slomo_1080p50_15s.mp4')
-	start_time = datetime.strptime('2021-10-28 13:48:58', '%Y-%m-%d %H:%M:%S')  # TODO change
+	video = Video(
+		input_path='datasets/bees/videos/PlanBee_Tracking_Frederick_4.mp4',
+		output_path='yolov5/runs/track/PlanBee_Tracking_Frederick_4.mp4'
+	)
+	# video = Video(
+	# 	input_path='datasets/bees/videos/PlanBee_Slomo_1080p50_5s.mp4',
+	# 	output_path='yolov5/runs/track/PlanBee_Slomo_1080p50_5s.mp4'
+	# )
+	start_time = datetime.strptime('2022-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')  # TODO change
 
 	print(f'Track: {datetime.now()}')
 
-	tracked_bees = track_bees(video)
+	tracked_bees, detections_per_frame = track_bees(video)
 
 	print(f'Track done {datetime.now()}')
 
@@ -185,9 +200,9 @@ if __name__ == '__main__':
 	fps = get_video_fps(video)
 
 	for bee in tracked_bees:
-		bee.determine_movement(HivePosition.BOTTOM_RIGHT, moving_offset)
+		bee.determine_movement(HivePosition.BOTTOM, moving_offset)
 
-	save_bee_paths_to_json(tracked_bees)
+	#save_bee_paths_to_json(tracked_bees)
 
 	# Now every bee has values for start_frame, end_frame and state of bee_movement
 	# Furthermore we can transform the list of bees to a list form of timeseries
@@ -195,11 +210,11 @@ if __name__ == '__main__':
 	bee_data: {float, list[int]} = {}
 
 	for bee in tracked_bees:
-		for frame in range(bee.start_frame_id, bee.end_frame_id):
-			timestamp = get_timestamp(frame, fps, start_time)
+		for frame_id in range(bee.start_frame_id, bee.end_frame_id):
+			timestamp = get_timestamp(frame_id, fps, start_time)
 
 			if timestamp not in bee_data.keys():
-				bee_data[timestamp] = [0, 0, 0]
+				bee_data[timestamp] = [0, 0, 0, 0]
 
 			if bee.bee_movement == BeeMovement.TO_HIVE:
 				bee_data[timestamp][0] += 1
@@ -208,10 +223,17 @@ if __name__ == '__main__':
 			elif bee.bee_movement == BeeMovement.NO_MOVEMENT:
 				bee_data[timestamp][2] += 1
 
-	#conn = db.get_connection()
-	#db.insert_tracking_data(conn, bee_data, 1, 1)
+	for frame_id, detections in detections_per_frame.items():
+		timestamp = get_timestamp(frame_id, fps, start_time)
 
+		if timestamp not in bee_data.keys():
+			bee_data[timestamp] = [0, 0, 0, len(detections)]
+		else:
+			bee_data[timestamp][3] = len(detections)
 
-	#print(bee_data)
+	conn = db.get_connection()
+	db.insert_tracking_data(conn, bee_data, 2, 6)
+
+	# print(bee_data)
 
 	print(f'Done: {datetime.now()}')

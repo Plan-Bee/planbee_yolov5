@@ -47,7 +47,18 @@ class BeeTrackingObject:
 
 		self.angle = int(math.degrees(math.atan2(y_difference, x_difference)) % 360)
 
-		if self.flies_out_of_frame and self.angle > greater_than_angle or self.angle < smaller_than_angle:
+		if greater_than_angle < smaller_than_angle:
+			# HivePos.LEFT: greater than: 90, smaller than: 270
+			# Bee: 300 Deg
+			# Bee flies away -> is between angles has to be FALSE
+			is_between_angles = self.angle in range(greater_than_angle, smaller_than_angle)
+		else:
+			# HivePos.RIGHT: greater than: 270, smaller than: 90
+			# Bee: 300 Deg
+			# Bee flies to hive -> is between angles has to be TRUE
+			is_between_angles = self.angle not in range(smaller_than_angle, greater_than_angle)
+
+		if self.flies_out_of_frame and is_between_angles:
 			self.bee_movement = BeeMovement.TO_HIVE
 		elif self.flies_out_of_frame:
 			self.bee_movement = BeeMovement.FROM_HIVE
